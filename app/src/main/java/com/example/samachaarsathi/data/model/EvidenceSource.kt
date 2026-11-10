@@ -1,0 +1,202 @@
+package com.example.samachaarsathi.data.model
+
+import java.net.URI
+
+/**
+ * Status of an evidence retrieval operation.
+ */
+enum class RetrievalStatus {
+    NOT_STARTED,
+    IN_PROGRESS,
+    SUCCESS,
+    EMPTY_RESULTS,
+    FAILED,
+}
+
+/**
+ * Categorization of the source based on URL and publishing authority.
+ */
+enum class SourceType {
+    OFFICIAL_PORTAL,
+    FACT_CHECK_ORGANIZATION,
+    NEWS_MEDIA,
+    WEB_SEARCH,
+    OTHER,
+}
+
+/**
+ * Overall availability of retrieved evidence for the claim.
+ */
+enum class EvidenceAvailability {
+    AVAILABLE,
+    PARTIAL,
+    NONE,
+    UNAVAILABLE,
+}
+
+/**
+ * DTO representing raw grounding chunks retrieved from Google Search Grounding.
+ */
+data class GroundingChunkDto(
+    val webUri: String? = null,
+    val webTitle: String? = null,
+    val webDomain: String? = null,
+)
+
+/**
+ * DTO representing grounding supports that link response segments to chunks.
+ */
+data class GroundingSupportDto(
+    val textSegment: String? = null,
+    val groundingChunkIndices: List<Int> = emptyList(),
+)
+
+/**
+ * DTO representing the grounding metadata structure returned by Google Search Grounding.
+ */
+data class GroundingMetadataDto(
+    val webSearchQueries: List<String> = emptyList(),
+    val searchEntryPointHtml: String? = null,
+    val groundingChunks: List<GroundingChunkDto> = emptyList(),
+    val groundingSupports: List<GroundingSupportDto> = emptyList(),
+)
+
+/**
+ * Represents a single web source retrieved via Google Search Grounding.
+ *
+ * @property id Unique identifier for UI keying and deduplication.
+ * @property title Title of the web page or document as returned by Google Search.
+ * @property url Unchanged web URL.
+ * @property domain Extracted domain name (e.g. "pib.gov.in", "ndtv.com").
+ * @property snippet Relevant text snippet or model segment grounded in this source.
+ * @property publishedDate Publication date if genuinely returned by the source, or null.
+ * @property sourceType Inferred categorization (e.g. OFFICIAL_PORTAL, NEWS_MEDIA).
+ * @property relatedAssertionIds IDs of the factual assertions this source relates to.
+ * @property retrievalTimestamp Epoch timestamp in milliseconds when this source was captured.
+ */
+data class EvidenceSource(
+    val id: String,
+    val title: String,
+    val url: String,
+    val domain: String? = extractDomain(url),
+    val snippet: String? = null,
+    val publishedDate: String? = null,
+    val sourceType: SourceType = inferSourceType(url, domain),
+    val relatedAssertionIds: List<String> = emptyList(),
+    val retrievalTimestamp: Long = System.currentTimeMillis(),
+) {
+    companion object {
+        /**
+         * Safely extracts the domain/host from a given URL string.
+         */
+        fun extractDomain(url: String?): String? {
+            if (url.isNullOrBlank()) return null
+            return try {
+                val trimmed = url.trim()
+                val uri = URI(if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) "https://$trimmed" else trimmed)
+                val host = uri.host ?: return null
+                if (host.startsWith("www.")) host.removePrefix("www.") else host
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        /**
+         * Infers source type based on domain characteristics.
+         */
+        fun inferSourceType(url: String?, domain: String? = extractDomain(url)): SourceType {
+            val d = domain?.lowercase() ?: return SourceType.WEB_SEARCH
+            return when {
+                d.endsWith(".gov") || d.endsWith(".gov.in") || d.endsWith(".nic.in") || d.contains("pib.gov.in") ->
+                    SourceType.OFFICIAL_PORTAL
+                d.contains("altnews.in") || d.contains("boomlive.in") || d.contains("vishvasnews") ||
+                    d.contains("snopes") || d.contains("factcheck") || d.contains("politifact") ||
+                    d.contains("thequint.com/news/webqoof") ->
+                    SourceType.FACT_CHECK_ORGANIZATION
+                d.contains("ndtv") || d.contains("thehindu") || d.contains("indianexpress") ||
+                    d.contains("indiatoday") || d.contains("timesofindia") || d.contains("hindustantimes") ||
+                    d.contains("bbc") || d.contains("reuters") || d.contains("apnews") ->
+                    SourceType.NEWS_MEDIA
+                else -> SourceType.WEB_SEARCH
+            }
+        }
+    }
+}
+
+/**
+ * Grounded evidence gathered for a specific factual assertion.
+ *
+ * @property assertionId Identifier of the assertion (e.g. "assertion_1").
+ * @property assertionText Text of the atomic factual assertion.
+ * @property sources Web sources discovered and grounded for this assertion.
+ * @property retrievalStatus Status of evidence retrieval for this assertion.
+ * @property groundingMetadata Raw or DTO grounding metadata returned by Google Search Grounding.
+ * @property searchQueries Web search queries generated by Gemini for this assertion.
+ * @property groundedResponseText Summary of findings generated by the grounded model.
+ */
+data class AssertionEvidence(
+    val assertionId: String,
+    val assertionText: String,
+    val sources: List<EvidenceSource> = emptyList(),
+    val retrievalStatus: RetrievalStatus = RetrievalStatus.NOT_STARTED,
+    val groundingMetadata: GroundingMetadataDto? = null,
+    val searchQueries: List<String> = emptyList(),
+    val groundedResponseText: String? = null,
+)
+
+/**
+ * Collection of all evidence gathered for the user's claim and its decomposed assertions.
+ *
+ * @property originalClaim Original raw claim text.
+ * @property structuredClaim Structured claim understanding from Brick 3 (if available).
+ * @property assertionEvidence Evidence broken down per assertion.
+ * @property overallRetrievalStatus Aggregated retrieval status.
+ * @property retrievalTimestamp Epoch timestamp of the retrieval session.
+ * @property errorsOrWarnings Non-fatal warnings or error messages encountered during retrieval.
+ */
+data class EvidenceCollection(
+    val originalClaim: String,
+    val structuredClaim: ClaimUnderstanding? = null,
+    val assertionEvidence: List<AssertionEvidence> = emptyList(),
+    val overallRetrievalStatus: RetrievalStatus = RetrievalStatus.NOT_STARTED,
+    val retrievalTimestamp: Long = System.currentTimeMillis(),
+    val errorsOrWarnings: List<String> = emptyList(),
+) {
+    /**
+     * All unique sources across all assertions, deduplicated by URL.
+     */
+    val allSources: List<EvidenceSource>
+        get() {
+            val sourceMap = mutableMapOf<String, EvidenceSource>()
+            for (assertion in assertionEvidence) {
+                for (source in assertion.sources) {
+                    val normalizedUrl = source.url.trim().removeSuffix("/")
+                    val existing = sourceMap[normalizedUrl]
+                    if (existing == null) {
+                        sourceMap[normalizedUrl] = source
+                    } else {
+                        // Merge assertion IDs and retain existing snippet if present
+                        val combinedIds = (existing.relatedAssertionIds + source.relatedAssertionIds).distinct()
+                        val combinedSnippet = existing.snippet ?: source.snippet
+                        sourceMap[normalizedUrl] = existing.copy(
+                            relatedAssertionIds = combinedIds,
+                            snippet = combinedSnippet,
+                        )
+                    }
+                }
+            }
+            return sourceMap.values.toList()
+        }
+
+    /**
+     * Inferred evidence availability based on discovered sources.
+     */
+    val evidenceAvailability: EvidenceAvailability
+        get() = when {
+            overallRetrievalStatus == RetrievalStatus.FAILED -> EvidenceAvailability.UNAVAILABLE
+            overallRetrievalStatus == RetrievalStatus.IN_PROGRESS -> EvidenceAvailability.PARTIAL
+            allSources.isEmpty() -> EvidenceAvailability.NONE
+            assertionEvidence.any { it.sources.isEmpty() } -> EvidenceAvailability.PARTIAL
+            else -> EvidenceAvailability.AVAILABLE
+        }
+}

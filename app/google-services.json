@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1049800625742",
+    "project_id": "samachaarsathi-4801b",
+    "storage_bucket": "samachaarsathi-4801b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1049800625742:android:ae47092eae964c6b127d1f",
+        "android_client_info": {
+          "package_name": "com.example.samachaarsathi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCkt1cfMjGJtHmyo2x9cPq8_OlA-fPY2Co"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
